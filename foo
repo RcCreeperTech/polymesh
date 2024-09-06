@@ -1,0 +1,126 @@
+typedef float f32;
+
+typedef struct jcv_point_ jcv_point;
+typedef struct jcv_rect_ jcv_rect;
+typedef struct jcv_site_ jcv_site;
+typedef struct jcv_edge_ jcv_edge;
+typedef struct jcv_graphedge_ jcv_graphedge;
+typedef struct jcv_delauney_edge_ jcv_delauney_edge;
+typedef struct jcv_delauney_iter_ jcv_delauney_iter;
+typedef struct jcv_diagram_ jcv_diagram;
+typedef struct jcv_clipper_ jcv_clipper;
+typedef struct jcv_context_internal_ jcv_context_internal;
+
+static const int JCV_DIRECTION_LEFT = 0;
+static const int JCV_DIRECTION_RIGHT = 1;
+
+struct jcv_point_ {
+  f32 x;
+  f32 y;
+};
+
+struct jcv_graphedge_ {
+  struct jcv_graphedge_ *next;
+  struct jcv_edge_ *edge;
+  struct jcv_site_ *neighbor;
+  jcv_point pos[2];
+  f32 angle;
+};
+
+struct jcv_site_ {
+  jcv_point p;
+  int index;            // Index into the original list of points
+  jcv_graphedge *edges; // The half edges owned by the cell
+};
+
+// The coefficients a, b and c are from the general line equation: ax * by + c =
+// 0
+struct jcv_edge_ {
+  struct jcv_edge_ *next;
+  jcv_site *sites[2];
+  jcv_point pos[2];
+  f32 a;
+  f32 b;
+  f32 c;
+};
+typedef struct jcv_halfedge_ {
+  jcv_edge *edge;
+  struct jcv_halfedge_ *left;
+  struct jcv_halfedge_ *right;
+  jcv_point vertex;
+  f32 y;
+  int direction; // 0=left, 1=right
+  int pqpos;
+} jcv_halfedge;
+
+static int jcv_halfedge_rightof(
+    // A pointer to a half-edge structure, which represents an arc on the beachline
+    const jcv_halfedge *he,
+    // A pointer to a point whose relative position to the half-edge is being
+    // tested.
+    const jcv_point *p) {
+
+  // The edge associated with the half-edge.
+  const jcv_edge *e = he->edge;
+
+  // The "top site" is one of the two sites associated with the edge,
+  // generally the one with the higher y value.
+  const jcv_site *topsite = e->sites[1];
+
+  // Is the point p to the right of the "top site"?
+  int right_of_site = (p->x > topsite->p.x) ? 1 : 0;
+
+  // Quick Checks Based on Direction:
+  if (right_of_site && he->direction == JCV_DIRECTION_LEFT)
+    return 1;
+  if (!right_of_site && he->direction == JCV_DIRECTION_RIGHT)
+    return 0;
+
+  // Compute Whether Point is Above or Below the Edge:
+  f32 dxp, dyp, dxs, t1, t2, t3, yl;
+
+  int is_above;
+  // If the edge's slope coefficient a equals 1, a different calculation method
+  // is used:
+  if (e->a == (f32)1) {
+    dyp = p->y - topsite->p.y;
+    dxp = p->x - topsite->p.x;
+    int is_fast = 0;
+
+    if ((!right_of_site & (e->b < (f32)0)) |
+        (right_of_site & (e->b >= (f32)0))) {
+
+      is_above = dyp >= e->b * dxp;
+      is_fast = is_above;
+
+    } else {
+      is_above = (p->x + p->y * e->b) > e->c;
+
+      if (e->b < (f32)0) {
+        is_above = !is_above;
+      }
+      if (!is_above) {
+        is_fast = 1;
+      }
+    }
+
+    if (!is_fast) {
+      dxs = topsite->p.x - e->sites[0]->p.x;
+      is_above = e->b * (dxp * dxp - dyp * dyp) <
+                 dxs * dyp * ((f32)1 + (f32)2 * dxp / dxs + e->b * e->b);
+
+      if (e->b < (f32)0) {
+        is_above = !is_above;
+      }
+    }
+  } else // e->b == 1
+  {
+    yl = e->c - e->a * p->x;
+    t1 = p->y - yl;
+    t2 = p->x - topsite->p.x;
+    t3 = yl - topsite->p.y;
+    is_above = t1 * t1 > (t2 * t2 + t3 * t3);
+  }
+
+  return (he->direction == JCV_DIRECTION_LEFT ? is_above : !is_above);
+}
