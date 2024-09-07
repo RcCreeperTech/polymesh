@@ -159,7 +159,7 @@ pub fn GenericPolyMesh(comptime VertexData: type, comptime EdgeData: type, compt
 
         /// Create a free floating edge, if `to` or `from` are provided,
         /// the edge will come pre linked to them
-        pub fn rawAddEdge(self: *@This(), maybe_from: ?*Vertex, maybe_to: ?*Vertex, data: EdgeData, link_vertex: bool) !*Edge {
+        pub fn rawAddEdge(self: *@This(), maybe_from: ?*Vertex, maybe_to: ?*Vertex, data: EdgeData, try_link_vertex: bool) !*Edge {
             // Allocate data
             const edge = try self.edges.create();
             const edge_from_half = try self.half_edges.create();
@@ -178,10 +178,8 @@ pub fn GenericPolyMesh(comptime VertexData: type, comptime EdgeData: type, compt
                 // link hedge to vertex
                 edge_from_half.origin = from;
                 // Link vertex to hedge
-                if (link_vertex and from.half == null) {
+                if (try_link_vertex and from.half == null) {
                     from.half = edge_from_half;
-                } else {
-                    return error.VertexAlreadyLinked;
                 }
             }
 
@@ -194,10 +192,8 @@ pub fn GenericPolyMesh(comptime VertexData: type, comptime EdgeData: type, compt
                 // link hedge to vertex
                 edge_to_half.origin = to;
                 // Link vertex to hedge
-                if (link_vertex and to.half == null) {
+                if (try_link_vertex and to.half == null) {
                     to.half = edge_to_half;
-                } else {
-                    return error.VertexAlreadyLinked;
                 }
             }
 

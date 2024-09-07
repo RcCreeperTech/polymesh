@@ -5,7 +5,9 @@ const mesh = @import("../mesh.zig");
 const EventQueue = @import("event_queue.zig");
 
 const assert = std.debug.assert;
-pub const PolyMesh = mesh.GenericPolyMesh(rl.Vector2, void, void);
+/// A null value corresponds to the point at infinity
+/// Having multiple vertices with this value is undefined behavior
+pub const PolyMesh = mesh.GenericPolyMesh(?rl.Vector2, void, void);
 
 const log = std.log.scoped(.voronoi_beachline);
 
@@ -58,7 +60,7 @@ pub const Arc = struct {
 const Boundary = struct {
     start: rl.Vector2,
     direction: rl.Vector2,
-    mesh_hedge: *PolyMesh.HalfEdge,
+    edge: *PolyMesh.Edge,
 };
 
 arcs: std.ArrayListUnmanaged(Arc),
