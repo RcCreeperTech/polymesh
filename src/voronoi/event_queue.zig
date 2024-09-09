@@ -1,6 +1,8 @@
 const std = @import("std");
 const rl = @import("raylib");
 
+const Beachline = @import("beachline.zig");
+
 const assert = std.debug.assert;
 
 const Voronoi = @This();
@@ -15,7 +17,7 @@ pub const Event = union(enum) {
         cancelled: bool = false,
         center: rl.Vector2,
         radius: f32,
-        arc_idx: usize,
+        arc: *Beachline.Arc,
     },
 
     pub fn sortHandle(self: *const @This()) f32 {
@@ -66,34 +68,11 @@ pub fn count(self: *@This()) usize {
     return self.queue.count();
 }
 
-pub fn add(self: *@This(), elem: Event) !void {
+pub fn add(self: *@This(), elem: Event) !*Event {
     const e = try self.event_pool.create();
     e.* = elem;
     try self.queue.add(e);
-}
-
-pub fn addTracking(self: *@This(), elem: Event) !*Event {
-    const e = try self.event_pool.create();
-    e.* = elem;
-
-    try self.queue.ensureUnusedCapacity(1);
-
-    const start_index = self.queue.items.len -| 1;
-    self.queue.items.len += 1;
-    self.queue.items[start_index] = e;
-
-    const child = self.queue.items[start_index];
-    var child_index = start_index;
-    while (child_index > 0) {
-        const parent_index = ((child_index - 1) >> 1);
-        const parent = self.queue.items[parent_index];
-        if (Event.lessThan(self.queue.context, child, parent) != .lt) break;
-        self.queue.items[child_index] = parent;
-        child_index = parent_index;
-    }
-    self.queue.items[child_index] = child;
-
-    return self.queue.items[child_index];
+    return e;
 }
 
 pub fn removeOrNull(self: *@This()) ?*Event {

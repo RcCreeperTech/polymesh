@@ -3,6 +3,7 @@ const std = @import("std");
 const rl = @import("raylib");
 const mesh = @import("mesh.zig");
 const Voronoi = @import("voronoi.zig");
+const Parabola = @import("voronoi/beachline.zig").Parabola;
 
 const assert = std.debug.assert;
 
@@ -22,8 +23,8 @@ const Line = struct {
 };
 
 pub fn main() anyerror!void {
-    const screenWidth = 800;
-    const screenHeight = 600;
+    const screenWidth = 1600;
+    const screenHeight = 900;
 
     var gpa: std.heap.GeneralPurposeAllocator(.{}) = .init;
     defer _ = gpa.deinit();
@@ -36,7 +37,7 @@ pub fn main() anyerror!void {
 
     var points: std.ArrayListUnmanaged(rl.Vector2) = .empty;
     defer points.deinit(allocator);
-    for (0..10) |_| {
+    for (0..30) |_| {
         const padding = 100;
         const point = getRandomVector2(
             0 + padding / 2,
@@ -52,37 +53,76 @@ pub fn main() anyerror!void {
     var voronoi: Voronoi = .init(allocator);
     defer voronoi.deinit(allocator);
 
-    try voronoi.generate(allocator, points.items, null);
+    voronoi.point_at_infinity = try voronoi.result_mesh.addVertex(null);
+    voronoi.clip_rect = gen_clip_rect: {
+        const aabb_padding = 20;
+        const infinity = std.math.inf(f32);
+        var min, var max = .{
+            rl.Vector2.init(infinity, infinity),
+            rl.Vector2.init(-infinity, -infinity),
+        };
+
+        for (points.items) |point| {
+            min = rl.Vector2.min(min, point);
+            max = rl.Vector2.max(max, point);
+        }
+        min = min.subtractValue(aabb_padding);
+        max = max.addValue(aabb_padding);
+        break :gen_clip_rect .{
+            .x = min.x,
+            .y = min.y,
+            .width = max.x - min.x,
+            .height = max.y - min.y,
+        };
+    };
+
+    for (points.items) |point| {
+        if (rl.checkCollisionPointRec(point, voronoi.clip_rect)) {
+            _ = try voronoi.event_queue.add(
+                .{ .site = point },
+            );
+        }
+    }
+    // TODO: Resize the clip rect
+
+    while (voronoi.event_queue.count() > 0) try voronoi.processEvent(allocator);
+
+    // TODO: Terminate remaining edges on the bounding box
+
     // while (voronoi.event_queue.count() > 0) try voronoi.processEvent(allocator);
 
     while (!rl.windowShouldClose()) {
         rl.beginDrawing();
         defer rl.endDrawing();
 
+        const mouse_y: f32 = @floatFromInt(rl.getMouseY());
+
         rl.clearBackground(rl.Color.white);
 
         for (points.items) |point| {
-            rl.drawCircleV(point, 4, rl.Color.gold);
+            rl.drawCircleV(point, 4, rl.Color.red);
+            const p: Parabola = .{ .focus = point };
+            p.draw(mouse_y, rl.Color.pink);
         }
 
-        rl.drawRectangleLinesEx(voronoi.clip_rect, 2, rl.Color.blue);
+        rl.drawLineEx(
+            rl.Vector2.init(0, mouse_y),
+            rl.Vector2.init(screenWidth, mouse_y),
+            4,
+            rl.Color.gold,
+        );
+
+        var it = voronoi.result_mesh.vertex_list.first;
+        while (it) |node| : (it = node.next) {
+            const vert = node.data;
+            if (vert.data) |point| {
+                rl.drawCircleV(point, 4, rl.Color.green);
+                if (vert.half.?.twin.origin.data) |b| {
+                    rl.drawLineV(point, b, rl.Color.blue);
+                }
+            }
+        }
     }
-}
-
-fn drawParabola(focus: rl.Vector2, directrix: f32, minX: f32, maxX: f32, maxY: f32, color: rl.Color) void {
-    _ = directrix; // autofix
-    _ = minX; // autofix
-    _ = maxX; // autofix
-    _ = maxY; // autofix
-    _ = color; // autofix
-    const arc: Voronoi.Arc = .{
-        .focus = focus,
-        .squeeze_event = null,
-    };
-    _ = arc; // autofix
-
-    const curvePts: [50]rl.Vector2 = undefined;
-    _ = curvePts; // autofix
 }
 
 fn getRandomVector2(min_x: i32, max_x: i32, min_y: i32, max_y: i32) rl.Vector2 {

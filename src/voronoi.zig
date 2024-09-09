@@ -64,7 +64,7 @@ pub fn generate(self: *@This(), allocator: std.mem.Allocator, points: []rl.Vecto
 
     for (points) |point| {
         if (rl.checkCollisionPointRec(point, self.clip_rect)) {
-            try self.event_queue.add(
+            _ = try self.event_queue.add(
                 .{ .site = point },
             );
         }
@@ -86,34 +86,32 @@ pub fn processEvent(self: *@This(), allocator: std.mem.Allocator) !void {
     }
 }
 
-pub fn addCircleEvent(self: *@This(), arc_idx: usize) !void {
-    const beach_items = self.beachline.arcs.items;
-    if (beach_items.len < 3) return;
-    if (arc_idx == 0 or arc_idx == beach_items.len - 1) return;
+pub fn addCircleEvent(self: *@This(), maybe_arc: ?*Beachline.Arc) !void {
+    if (maybe_arc) |arc| {
+        if (arc.arc_left == null or arc.arc_right == null) return;
+        log.info("Trying to add circle event for arc {}, left = {} right = {}", .{ arc, arc.arc_left.?, arc.arc_right.? });
 
-    const lo, const hi = .{ arc_idx - 1, arc_idx + 2 };
-    log.info("Attempting to add Circle event with range = {d}..{d}", .{ lo, hi });
-    const focii = beach_items[lo..hi];
+        if (circleFromPoints(arc.arc_left.?.parabola.focus, arc.parabola.focus, arc.arc_right.?.parabola.focus)) |circle| {
+            log.info("Adding circle event, circle = {any}", .{circle});
 
-    if (circleFromPoints(focii[0].focus, focii[1].focus, focii[2].focus)) |circle| {
-        log.info("Adding circle event arc_idx = {d}, beach_len = {d}, circle = {any}", .{ arc_idx, self.beachline.arcs.items.len, circle });
-        self.beachline.getArcPtr(arc_idx).event = try self.event_queue.addTracking(.{
-            .circle = .{
-                .center = circle.center,
-                .radius = circle.radius,
-                .arc_idx = arc_idx,
-            },
-        });
-    } else |err| {
-        log.err("Unable to generate circle {{{d}, {d}}}, {{{d}, {d}}}, {{{d}, {d}}}: {any}", .{
-            focii[0].focus.x,
-            focii[0].focus.y,
-            focii[1].focus.x,
-            focii[1].focus.y,
-            focii[2].focus.x,
-            focii[2].focus.y,
-            err,
-        });
+            arc.event = try self.event_queue.add(.{
+                .circle = .{
+                    .center = circle.center,
+                    .radius = circle.radius,
+                    .arc = arc,
+                },
+            });
+        } else |err| {
+            log.err("Unable to generate circle {{{d}, {d}}}, {{{d}, {d}}}, {{{d}, {d}}}: {any}", .{
+                arc.arc_left.?.parabola.focus.x,
+                arc.arc_left.?.parabola.focus.y,
+                arc.parabola.focus.x,
+                arc.parabola.focus.y,
+                arc.arc_right.?.parabola.focus.x,
+                arc.arc_right.?.parabola.focus.y,
+                err,
+            });
+        }
     }
 }
 /// The only time an arc can appear on the beachline is during a site event
@@ -124,107 +122,46 @@ pub fn siteEvent(
     focus: std.meta.TagPayload(EventQueue.Event, .site),
 ) !void {
     log.info("Beachline {any}", .{self.beachline});
-    // Locate the existing arc (if any) that is above the new site
-    const idx, const yval =
-        self.beachline.findOverlappingArcInfo(focus);
-
-    if (self.beachline.getArcPtrOrNull(idx)) |old_arc| {
-        // Invalidate the potential circle event in the event queue
-        if (old_arc.event) |event| event.circle.cancelled = true;
-
+    if (self.beachline.findOverlappingArcInfoOrNull(focus)) |info| {
+        const old_arc_idx, const old_arc_focus, const yval = info;
         // Do some vector math
         const edge_start = rl.Vector2.init(focus.x, yval);
-        const focus_offset: rl.Vector2 = .init(focus.x - old_arc.focus.x, focus.y - old_arc.focus.y);
+        const focus_offset = focus.subtract(old_arc_focus);
         const edge_direction = rl.Vector2.init(focus_offset.y, -focus_offset.x).normalize();
-
         // Create initial edge data for the mesh
         const start_vertex = try self.result_mesh.addVertex(edge_start);
-
-        const inner_boundary_left = try self.beachline.createBoundary(.{
-            .edge = try self.result_mesh.rawAddEdge(start_vertex, null, {}, true),
-            .direction = edge_direction,
-            .start = edge_start,
-        });
-
-        const inner_boundary_right = try self.beachline.createBoundary(.{
-            .edge = try self.result_mesh.rawAddEdge(start_vertex, null, {}, true),
-            .direction = edge_direction.negate(),
-            .start = edge_start,
-        });
-
-        const new_arcs: [3]Beachline.Arc = .{
-            .{ // Left
-                .focus = old_arc.focus,
-                .event = null,
-                .boundary_left = old_arc.boundary_left,
-                .boundary_right = inner_boundary_left,
-            },
-            .{ // Middle
-                .focus = focus,
-                .event = null,
-                .boundary_left = inner_boundary_left,
-                .boundary_right = inner_boundary_right,
-            },
-            .{ // Right
-                .focus = old_arc.focus,
-                .event = null,
-                .boundary_left = inner_boundary_right,
-                .boundary_right = old_arc.boundary_right,
-            },
-        };
-
-        const replacement_range: []const Beachline.Arc = &new_arcs;
-
-        log.info("Replacing arc at index {d} with {any}", .{
-            idx,
-            replacement_range,
-        });
-
-        try self.beachline.arcs.replaceRange(
+        // Insert the new Arc
+        const new_arc = try self.beachline.insertArc(
             allocator,
-            idx,
-            1,
-            replacement_range,
-        );
-        // PERF: Currently we need to fixup all the circle events that refer to all
-        //       arcs to the right of the added ones because they are holding indices
-        //       into a flat list of arcs :(
-        for (self.event_queue.queue.items) |item| switch (item.*) {
-            .circle => |circle| {
-                if (circle.arc_idx > idx) item.circle.arc_idx += 2;
+            old_arc_idx,
+            focus,
+            .{
+                .edge = try self.result_mesh.rawAddEdge(start_vertex, null, {}, true),
+                .direction = edge_direction,
+                .start = edge_start,
             },
-            else => {},
-        };
-        log.info("Beachline {any}", .{self.beachline});
+            .{
+                .edge = try self.result_mesh.rawAddEdge(start_vertex, null, {}, true),
+                .direction = edge_direction.negate(),
+                .start = edge_start,
+            },
+        );
 
-        const new_arc_idx = idx + 1; // beacause we always insert "old new old" on top of "old"
-        try self.addCircleEvent(new_arc_idx - 1);
-        try self.addCircleEvent(new_arc_idx + 1);
+        log.info("Beachline {any}", .{self.beachline});
+        // Check for circle events to the left and right
+        try self.addCircleEvent(new_arc.arc_left);
+        try self.addCircleEvent(new_arc.arc_right);
     } else {
-        @branchHint(.cold);
-        try self.beachline.arcs.append(allocator, .{
-            .focus = focus,
-            .event = null,
-            .boundary_left = try self.beachline.createBoundary(.{
-                .edge = try self.result_mesh.rawAddEdge(self.point_at_infinity, null, {}, true),
-                .direction = .init(0, 1),
-                .start = .zero(),
-            }),
-            .boundary_right = try self.beachline.createBoundary(.{
-                .edge = try self.result_mesh.rawAddEdge(self.point_at_infinity, null, {}, true),
-                .direction = .init(0, 1),
-                .start = .zero(),
-            }),
-        });
+        _ = try self.beachline.insertArc(allocator, 0, focus, null, null);
+        log.info("Beachline {any}", .{self.beachline});
     }
-    log.info("Beachline {any}", .{self.beachline});
 }
 
 /// Circle events correspond to Voronoi vertices, false alarm events are never processed
 pub fn circleEvent(self: *@This(), inner: std.meta.TagPayload(EventQueue.Event, .circle)) !void {
     assert(inner.cancelled == false);
     assert(inner.cancelled == false);
-    const arc: *Beachline.Arc = self.beachline.getArcPtr(inner.arc_idx);
+    const arc: *Beachline.Arc = inner.arc;
     assert(arc.boundary_left != null and arc.boundary_right != null);
     const intersection_point = inner.center;
     log.info("Running circle event", .{});
@@ -237,38 +174,21 @@ pub fn circleEvent(self: *@This(), inner: std.meta.TagPayload(EventQueue.Event, 
     arc.boundary_left.?.edge.half.twin.origin = vertex;
     arc.boundary_right.?.edge.half.twin.origin = vertex;
     // Get the left and right arcs
-    const left = self.beachline.getArcPtr(inner.arc_idx - 1);
-    const right = self.beachline.getArcPtr(inner.arc_idx + 1);
-    // Create the new boundary to join the two arcs
-    const offset = right.focus.subtract(left.focus);
-    const new_boundary = try self.beachline.createBoundary(.{
-        .edge = try self.result_mesh.rawAddEdge(vertex, null, {}, true),
-        .direction = rl.Vector2.init(offset.y, -offset.x).normalize(),
-        .start = intersection_point,
-    });
-    // Stitch up the gap before we invalidate our pointers
-    left.boundary_right = new_boundary;
-    right.boundary_left = new_boundary;
-    // Destroy merged boundaries
-    self.beachline.boundary_pool.destroy(arc.boundary_left.?);
-    self.beachline.boundary_pool.destroy(arc.boundary_right.?);
-    // Remove the arc and the duplicate arc to the right
-    // NOTE: This operation invalidates arcPtr's and indexs above the removed arc
-    _ = self.beachline.arcs.orderedRemove(inner.arc_idx);
-    // PERF: Currently we need to fixup all the circle events that refer to all
-    //       arcs to the right of the removed one because they are holding indices
-    //       into a flat list of arcs
-    for (self.event_queue.queue.items) |item| switch (item.*) {
-        .circle => |circle| {
-            if (circle.arc_idx > inner.arc_idx) item.circle.arc_idx += 1;
+    const left = arc.arc_left.?;
+    const right = arc.arc_right.?;
+    // Remove the old arc and insert a boundary
+    const offset = right.parabola.focus.subtract(left.parabola.focus);
+    try self.beachline.removeArc(
+        arc,
+        .{
+            .edge = try self.result_mesh.rawAddEdge(vertex, null, {}, true),
+            .direction = rl.Vector2.init(offset.y, -offset.x).normalize(),
+            .start = intersection_point,
         },
-        else => {},
-    };
+    );
     // Check the new triplets in the beachline for circle events
-    const left_idx = inner.arc_idx - 1; // NOTE: This should never underflow
-    const right_idx = inner.arc_idx; // We did a remove on the old arc so this is now the correct index
-    try self.addCircleEvent(left_idx);
-    try self.addCircleEvent(right_idx);
+    try self.addCircleEvent(left);
+    try self.addCircleEvent(right);
 }
 
 /// Computes the intersection of two parabolas given the directrix

@@ -1,18 +1,22 @@
 const std = @import("std");
 
-const Pool = std.heap.MemoryPool;
-
 pub fn GenericPolyMesh(comptime VertexData: type, comptime EdgeData: type, comptime FaceData: type) type {
     return struct {
         pub const Vertex = struct {
+            const List = std.DoublyLinkedList(@This());
+            const Pool = std.heap.MemoryPool(List.Node);
             half: ?*HalfEdge,
             data: VertexData,
         };
         pub const Edge = struct {
+            const List = std.DoublyLinkedList(@This());
+            const Pool = std.heap.MemoryPool(List.Node);
             half: *HalfEdge,
             data: EdgeData,
         };
         pub const Face = struct {
+            const List = std.DoublyLinkedList(@This());
+            const Pool = std.heap.MemoryPool(List.Node);
             half: *HalfEdge,
             data: FaceData,
 
@@ -45,6 +49,8 @@ pub fn GenericPolyMesh(comptime VertexData: type, comptime EdgeData: type, compt
         };
 
         pub const HalfEdge = struct {
+            const List = std.DoublyLinkedList(@This());
+            const Pool = std.heap.MemoryPool(List.Node);
             origin: *Vertex,
             left_face: ?*Face,
             parent: *Edge,
@@ -58,25 +64,83 @@ pub fn GenericPolyMesh(comptime VertexData: type, comptime EdgeData: type, compt
             }
         };
 
-        verts: Pool(Vertex),
-        edges: Pool(Edge),
-        faces: Pool(Face),
-        half_edges: Pool(HalfEdge),
+        vertex_list: Vertex.List,
+        edge_list: Edge.List,
+        face_list: Face.List,
+        half_edge_list: HalfEdge.List,
+
+        vertex_pool: Vertex.Pool,
+        edge_pool: Edge.Pool,
+        face_pool: Face.Pool,
+        half_edge_pool: HalfEdge.Pool,
 
         pub fn init(allocator: std.mem.Allocator) @This() {
             return .{
-                .verts = .init(allocator),
-                .edges = .init(allocator),
-                .faces = .init(allocator),
-                .half_edges = .init(allocator),
+                .vertex_list = .{},
+                .edge_list = .{},
+                .face_list = .{},
+                .half_edge_list = .{},
+
+                .vertex_pool = .init(allocator),
+                .edge_pool = .init(allocator),
+                .face_pool = .init(allocator),
+                .half_edge_pool = .init(allocator),
             };
         }
 
         pub fn deinit(self: *@This()) void {
-            self.verts.deinit();
-            self.edges.deinit();
-            self.faces.deinit();
-            self.half_edges.deinit();
+            self.vertex_pool.deinit();
+            self.edge_pool.deinit();
+            self.face_pool.deinit();
+            self.half_edge_pool.deinit();
+        }
+
+        pub fn allocVertex(self: *@This()) !*Vertex {
+            const node = try self.vertex_pool.create();
+            self.vertex_list.append(node);
+            return &node.data;
+        }
+
+        pub fn createVertex(self: *@This(), vertex: Vertex) !*Vertex {
+            const data = try self.allocVertex();
+            data.* = vertex;
+            return data;
+        }
+
+        pub fn allocEdge(self: *@This()) !*Edge {
+            const node = try self.edge_pool.create();
+            self.edge_list.append(node);
+            return &node.data;
+        }
+
+        pub fn createEdge(self: *@This(), edge: Edge) !*Edge {
+            const data = try self.allocEdge();
+            data.* = edge;
+            return data;
+        }
+
+        pub fn allocFace(self: *@This()) !*Face {
+            const node = try self.face_pool.create();
+            self.face_list.append(node);
+            return &node.data;
+        }
+
+        pub fn createFace(self: *@This(), face: Face) !*Face {
+            const data = try self.allocFace();
+            data.* = face;
+            return data;
+        }
+
+        pub fn allocHalfEdge(self: *@This()) !*HalfEdge {
+            const node = try self.half_edge_pool.create();
+            self.half_edge_list.append(node);
+            return &node.data;
+        }
+
+        pub fn createHalfEdge(self: *@This(), half_edge: HalfEdge) !*HalfEdge {
+            const data = try self.allocHalfEdge();
+            data.* = half_edge;
+            return data;
         }
 
         pub fn findFreeIncident(vertex: *Vertex) ?*HalfEdge {
@@ -150,20 +214,19 @@ pub fn GenericPolyMesh(comptime VertexData: type, comptime EdgeData: type, compt
         }
 
         pub fn addVertex(self: *@This(), data: VertexData) !*Vertex {
-            const vertex = try self.verts.create();
-            vertex.*.half = null;
-            vertex.*.data = data;
-            std.debug.assert(vertex.*.half == null);
-            return vertex;
+            return try self.createVertex(.{
+                .half = null,
+                .data = data,
+            });
         }
 
         /// Create a free floating edge, if `to` or `from` are provided,
         /// the edge will come pre linked to them
         pub fn rawAddEdge(self: *@This(), maybe_from: ?*Vertex, maybe_to: ?*Vertex, data: EdgeData, try_link_vertex: bool) !*Edge {
             // Allocate data
-            const edge = try self.edges.create();
-            const edge_from_half = try self.half_edges.create();
-            const edge_to_half = try self.half_edges.create();
+            const edge = try self.allocEdge();
+            const edge_from_half = try self.allocHalfEdge();
+            const edge_to_half = try self.allocHalfEdge();
 
             // Initialize data
             edge.data = data;
@@ -255,6 +318,7 @@ pub fn GenericPolyMesh(comptime VertexData: type, comptime EdgeData: type, compt
                 chainHalfEdges(edge_from_half, to_out);
             }
 
+            try self.all_the_crap.append(.{ .e = edge });
             return edge;
         }
 
@@ -290,6 +354,7 @@ pub fn GenericPolyMesh(comptime VertexData: type, comptime EdgeData: type, compt
                 current.left_face = face;
             }
 
+            try self.all_the_crap.append(.{ .f = face });
             return face;
         }
 
