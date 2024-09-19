@@ -1,13 +1,13 @@
 const std = @import("std");
 const rl = @import("raylib");
 
-const mesh = @import("../mesh.zig");
+const mesh = @import("../polymesh.zig");
 const EventQueue = @import("event_queue.zig");
 
 const assert = std.debug.assert;
 /// A null value corresponds to the point at infinity
 /// Having multiple vertices with this value is undefined behavior
-pub const PolyMesh = mesh.GenericPolyMesh(?rl.Vector2, void, void);
+pub const PolyMesh = mesh.PolyMesh(?rl.Vector2, void, void);
 
 const log = std.log.scoped(.voronoi_beachline);
 
@@ -37,6 +37,10 @@ pub const Parabola = struct {
     pub fn draw(self: *const @This(), directrix: f32, color: rl.Color) void {
         const bound = 400;
         const step: f32 = 15;
+        if (std.math.approxEqAbs(f32, directrix, self.focus.y, std.math.floatEps(f32))) {
+            rl.drawLineEx(self.focus, .{ .x = self.focus.x, .y = 0 }, 3, rl.Color.dark_purple);
+            return;
+        }
         self.drawEx(directrix, color, bound, step);
     }
 

@@ -15,6 +15,12 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
+    const poly_mesh = b.addModule("polymesh", .{
+        .root_source_file = .{ .cwd_relative = "./src/polymesh.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
     const raylib_dep = b.dependency("raylib-zig", .{
         .target = target,
         .optimize = optimize,
@@ -33,6 +39,38 @@ pub fn build(b: *std.Build) void {
     exe.linkLibrary(raylib_artifact);
     exe.root_module.addImport("raylib", raylib);
     exe.root_module.addImport("raygui", raygui);
+
+    const example_dir = "src/examples/";
+    const examples = .{
+        .{ "basic_usage", "Shows some common graph operations" },
+        .{ "random_graph", "Initializes a random graph" },
+        .{ "triangulate", "Triangulates a set of random points" },
+    };
+
+    inline for (examples) |data| {
+        const example, const description = data;
+        const example_exe = b.addExecutable(.{
+            .name = example,
+            .root_source_file = b.path(example_dir ++ example ++ ".zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+
+        example_exe.root_module.addImport("raylib", raylib);
+        example_exe.root_module.addImport("polymesh", poly_mesh);
+        example_exe.linkLibrary(raylib_artifact);
+
+        b.installArtifact(example_exe);
+
+        const build_example = b.addInstallArtifact(example_exe, .{});
+        const example_build_step = b.step(example, "Builds the " ++ example ++ " example: " ++ description);
+        example_build_step.dependOn(&build_example.step);
+
+        const run_example = b.addRunArtifact(example_exe);
+        run_example.step.dependOn(&build_example.step);
+        const example_run_step = b.step("run_" ++ example, "Builds then Runs the " ++ example ++ " example: " ++ description);
+        example_run_step.dependOn(&run_example.step);
+    }
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
@@ -62,17 +100,17 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    const exe_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/main.zig"),
+    const unit_tests = b.addTest(.{
+        .root_source_file = b.path("src/polymesh.zig"),
         .target = target,
         .optimize = optimize,
     });
 
-    const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
+    const run_unit_tests = b.addRunArtifact(unit_tests);
 
     // Similar to creating the run step earlier, this exposes a `test` step to
     // the `zig build --help` menu, providing a way for the user to request
     // running the unit tests.
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_exe_unit_tests.step);
+    test_step.dependOn(&run_unit_tests.step);
 }

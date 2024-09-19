@@ -1,9 +1,12 @@
 const std = @import("std");
-
 const rl = @import("raylib");
-const mesh = @import("mesh.zig");
+const rg = @import("raygui");
+
+const PolyMesh = @import("polymesh.zig").PolyMesh;
 const Voronoi = @import("voronoi.zig");
 const Parabola = @import("voronoi/beachline.zig").Parabola;
+
+const Mesh = PolyMesh(rl.Vector2, void, void);
 
 const assert = std.debug.assert;
 
@@ -49,45 +52,67 @@ pub fn main() anyerror!void {
         try points.append(allocator, point);
     }
 
+    var dynamesh: Mesh = .empty;
+    defer dynamesh.deinit(allocator);
+
     // Voronoi
-    var voronoi: Voronoi = .init(allocator);
-    defer voronoi.deinit(allocator);
+    // var voronoi: Voronoi = .init(allocator);
+    // defer voronoi.deinit(allocator);
 
-    voronoi.point_at_infinity = try voronoi.result_mesh.addVertex(null);
-    voronoi.clip_rect = gen_clip_rect: {
-        const aabb_padding = 20;
-        const infinity = std.math.inf(f32);
-        var min, var max = .{
-            rl.Vector2.init(infinity, infinity),
-            rl.Vector2.init(-infinity, -infinity),
-        };
+    // voronoi.clip_rect = gen_clip_rect: {
+    //     const aabb_padding = 20;
+    //     const infinity = std.math.inf(f32);
+    //     var min, var max = .{
+    //         rl.Vector2.init(infinity, infinity),
+    //         rl.Vector2.init(-infinity, -infinity),
+    //     };
+    //
+    //     for (points.items) |point| {
+    //         min = rl.Vector2.min(min, point);
+    //         max = rl.Vector2.max(max, point);
+    //     }
+    //     min = min.subtractValue(aabb_padding);
+    //     max = max.addValue(aabb_padding);
+    //     break :gen_clip_rect .{
+    //         .x = min.x,
+    //         .y = min.y,
+    //         .width = max.x - min.x,
+    //         .height = max.y - min.y,
+    //     };
+    // };
 
-        for (points.items) |point| {
-            min = rl.Vector2.min(min, point);
-            max = rl.Vector2.max(max, point);
-        }
-        min = min.subtractValue(aabb_padding);
-        max = max.addValue(aabb_padding);
-        break :gen_clip_rect .{
-            .x = min.x,
-            .y = min.y,
-            .width = max.x - min.x,
-            .height = max.y - min.y,
-        };
-    };
-
+    var map: std.AutoHashMap(Mesh.Vertex.Handle, void) = .init(allocator);
+    defer map.deinit();
+    var handles: std.ArrayListUnmanaged(Mesh.Vertex.Handle) = .empty;
+    defer handles.deinit(allocator);
     for (points.items) |point| {
-        if (rl.checkCollisionPointRec(point, voronoi.clip_rect)) {
-            _ = try voronoi.event_queue.add(
-                .{ .site = point },
-            );
-        }
+        try handles.append(
+            allocator,
+            try dynamesh.addVertex(allocator, point),
+        );
+        // if (rl.checkCollisionPointRec(point, voronoi.clip_rect)) {
+        //     _ = try voronoi.event_queue.add(
+        //         .{ .site = point },
+        //     );
+        // }
+
     }
-    // TODO: Resize the clip rect
 
-    while (voronoi.event_queue.count() > 0) try voronoi.processEvent(allocator);
-
-    // TODO: Terminate remaining edges on the bounding box
+    for (handles.items) |from| {
+        const already_used: std.BoundedArray(usize, 2) = .{};
+        var rand: usize = @intCast(rl.getRandomValue(0, @intCast(handles.items.len - 1)));
+        while (map.contains(handles.items[rand]) or
+            std.mem.containsAtLeast(usize, &already_used.buffer, 1, &.{rand})) : (rand = @intCast(rl.getRandomValue(0, @intCast(handles.items.len - 1))))
+        {}
+        for (0..3) |_| {
+            const to = handles.items[rand];
+            _ = dynamesh.addEdge(allocator, from, to, {}) catch |err| switch (err) {
+                error.DuplicateVertices => {},
+                else => return err,
+            };
+        }
+        try map.put(from, {});
+    }
 
     // while (voronoi.event_queue.count() > 0) try voronoi.processEvent(allocator);
 
@@ -95,32 +120,57 @@ pub fn main() anyerror!void {
         rl.beginDrawing();
         defer rl.endDrawing();
 
-        const mouse_y: f32 = @floatFromInt(rl.getMouseY());
+        // const mouse_y: f32 = @floatFromInt(rl.getMouseY());
+
+        // if (rg.guiButton(.{
+        //     .x = 50,
+        //     .y = 50,
+        //     .width = 100,
+        //     .height = 50,
+        // }, "Advance") > 0) {
+        //     if (voronoi.event_queue.count() > 0) try voronoi.processEvent(allocator);
+        // }
 
         rl.clearBackground(rl.Color.white);
 
-        for (points.items) |point| {
-            rl.drawCircleV(point, 4, rl.Color.red);
-            const p: Parabola = .{ .focus = point };
-            p.draw(mouse_y, rl.Color.pink);
+        // for (points.items) |point| {
+        //     rl.drawCircleV(point, 4, rl.Color.red);
+        //     // const p: Parabola = .{ .focus = point };
+        //     // p.draw(mouse_y, rl.Color.pink);
+        // }
+
+        // voronoi.debugDraw(screenWidth);
+
+        // rl.drawLineEx(
+        //     rl.Vector2.init(0, mouse_y),
+        //     rl.Vector2.init(screenWidth, mouse_y),
+        //     4,
+        //     rl.Color.gold,
+        // );
+
+        // var it = voronoi.result_mesh.vertex_list.first;
+        // while (it) |node| : (it = node.next) {
+        //     const vert = node.data;
+        //     if (vert.data) |point| {
+        //         rl.drawCircleV(point, 4, rl.Color.green);
+        //         // if (vert.half.?.twin.origin.data) |b| {
+        //         //     rl.drawLineV(point, b, rl.Color.blue);
+        //         // }
+        //     }
+        // }
+
+        for (dynamesh.pools.vertex.slot_list.items, 0..) |vert, i| {
+            if (dynamesh.pools.vertex.free_bitset.isSet(i)) continue;
+            rl.drawCircleV(vert.data, 5, rl.Color.red);
         }
-
-        rl.drawLineEx(
-            rl.Vector2.init(0, mouse_y),
-            rl.Vector2.init(screenWidth, mouse_y),
-            4,
-            rl.Color.gold,
-        );
-
-        var it = voronoi.result_mesh.vertex_list.first;
-        while (it) |node| : (it = node.next) {
-            const vert = node.data;
-            if (vert.data) |point| {
-                rl.drawCircleV(point, 4, rl.Color.green);
-                if (vert.half.?.twin.origin.data) |b| {
-                    rl.drawLineV(point, b, rl.Color.blue);
-                }
-            }
+        for (dynamesh.pools.edge.slot_list.items, 0..) |edge, i| {
+            if (dynamesh.pools.edge.free_bitset.isSet(i)) continue;
+            const hedge_pool = &dynamesh.pools.half_edge;
+            const vert_pool = &dynamesh.pools.vertex;
+            const half = edge.half;
+            const from = half.origin(hedge_pool).deref(vert_pool);
+            const to = half.twin(hedge_pool).origin(hedge_pool).deref(vert_pool);
+            rl.drawLineEx(from.data, to.data, 5, rl.Color.green);
         }
     }
 }

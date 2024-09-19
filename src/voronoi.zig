@@ -15,22 +15,23 @@ result_mesh: Beachline.PolyMesh,
 beachline: Beachline,
 event_queue: EventQueue,
 clip_rect: rl.Rectangle,
-point_at_infinity: *Beachline.PolyMesh.Vertex,
+
+debug_last_event: ?*EventQueue.Event,
 
 pub fn init(allocator: std.mem.Allocator) @This() {
     return .{
         .directrix = 0,
-        .result_mesh = .init(allocator),
+        .result_mesh = .empty,
         .beachline = .init(allocator),
         .event_queue = .init(allocator),
         .clip_rect = undefined, // FIXME:
-        .point_at_infinity = undefined,
+        .debug_last_event = null,
     };
 }
 
 pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
     self.beachline.deinit(allocator);
-    self.result_mesh.deinit();
+    self.result_mesh.deinit(allocator);
     self.event_queue.deinit();
 }
 
@@ -76,9 +77,37 @@ pub fn generate(self: *@This(), allocator: std.mem.Allocator, points: []rl.Vecto
     // TODO: Terminate remaining edges on the bounding box
 }
 
+pub fn debugDraw(self: *@This(), screen_w: f32) void {
+    // Render The Beachline
+    for (self.beachline.arc_list.items) |arc| {
+        rl.drawCircleV(arc.parabola.focus, 5, rl.Color.blue);
+        arc.parabola.draw(self.directrix, rl.Color.pink);
+        arc.parabola.draw(self.directrix, rl.Color.pink);
+    }
+    // Render the last event
+    if (self.debug_last_event) |ev|
+        switch (ev.*) {
+            .site => |site| {
+                rl.drawCircleV(site, 7, rl.Color.red);
+            },
+            .circle => |circle| {
+                rl.drawCircleLinesV(circle.center, circle.radius, rl.Color.green);
+            },
+        };
+    // Render the sweepline
+    rl.drawLineEx(
+        rl.Vector2.init(0, self.directrix),
+        rl.Vector2.init(screen_w, self.directrix),
+        4,
+        rl.Color.beige,
+    );
+}
+
 pub fn processEvent(self: *@This(), allocator: std.mem.Allocator) !void {
     if (self.event_queue.removeOrNull()) |event| {
         log.info("Processing Event {any} ", .{event});
+        self.debug_last_event = event;
+        self.directrix = event.sortHandle();
         switch (event.*) {
             .site => |site| try self.siteEvent(allocator, site),
             .circle => |circle| if (!circle.cancelled) try self.circleEvent(circle),
@@ -129,7 +158,7 @@ pub fn siteEvent(
         const focus_offset = focus.subtract(old_arc_focus);
         const edge_direction = rl.Vector2.init(focus_offset.y, -focus_offset.x).normalize();
         // Create initial edge data for the mesh
-        const start_vertex = try self.result_mesh.addVertex(edge_start);
+        const start_vertex = try self.result_mesh.addVertex(allocator, edge_start);
         // Insert the new Arc
         const new_arc = try self.beachline.insertArc(
             allocator,
