@@ -195,34 +195,30 @@ pub fn PolyMesh(comptime VertexData: type, comptime EdgeData: type, comptime Fac
             prev: HalfEdge.Handle,
         };
 
-        pools: struct {
-            vertex: Vertex.Pool,
-            edge: Edge.Pool,
-            face: Face.Pool,
-            half_edge: HalfEdge.Pool,
+        verts: Vertex.Pool,
+        edges: Edge.Pool,
+        faces: Face.Pool,
+        hedges: HalfEdge.Pool,
 
-            pub const empty: @This() = .{
-                .vertex = .empty,
-                .edge = .empty,
-                .face = .empty,
-                .half_edge = .empty,
-            };
-        },
-
-        pub const empty: Self = .{ .pools = .empty };
+        pub const empty: Self = .{
+            .verts = .empty,
+            .faces = .empty,
+            .edges = .empty,
+            .hedges = .empty,
+        };
 
         pub fn deinit(self: *Self, allocator: Allocator) void {
-            self.pools.vertex.deinit(allocator);
-            self.pools.edge.deinit(allocator);
-            self.pools.face.deinit(allocator);
-            self.pools.half_edge.deinit(allocator);
+            self.verts.deinit(allocator);
+            self.edges.deinit(allocator);
+            self.faces.deinit(allocator);
+            self.hedges.deinit(allocator);
         }
 
         pub fn dumpDebugInfo(self: *Self, writer: anytype, comptime show_dead: bool) !void {
-            const verts = self.pools.vertex;
-            const faces = self.pools.face;
-            const edges = self.pools.edge;
-            const hedges = self.pools.half_edge;
+            const hedges = &self.hedges;
+            const edges = &self.edges;
+            const verts = &self.verts;
+            const faces = &self.faces;
 
             const table_names = .{ "Vertex", "Face", "Edge", "Half Edge" };
             const tables = .{ verts, faces, edges, hedges };
@@ -322,8 +318,8 @@ pub fn PolyMesh(comptime VertexData: type, comptime EdgeData: type, comptime Fac
         /// Given a vertex finds the first inbound half edge without a left face.
         /// Returns error in the case that there is not a half edge satisfying this property
         pub fn findFirstFreeInboundHalfEdgeOrNull(self: *Self, vert: Vertex.Handle) !?HalfEdge.Handle {
-            const hedges = &self.pools.half_edge;
-            const verts = &self.pools.vertex;
+            const hedges = &self.hedges;
+            const verts = &self.verts;
             if (vert.halfOrNull(verts)) |half| {
                 const start = half.twin(hedges);
                 var current: HalfEdge.Handle = start;
@@ -341,8 +337,8 @@ pub fn PolyMesh(comptime VertexData: type, comptime EdgeData: type, comptime Fac
         }
 
         pub fn findBoundaryHalfEdgeOrNull(self: *Self, from: Vertex.Handle, to: Vertex.Handle) ?HalfEdge.Handle {
-            const verts = &self.pools.vertex;
-            const hedges = &self.pools.half_edge;
+            const verts = &self.verts;
+            const hedges = &self.hedges;
             if (from.halfOrNull(verts)) |from_half| {
                 if (to.halfOrNull(verts)) |_| {
                     const start = from_half;
@@ -366,13 +362,13 @@ pub fn PolyMesh(comptime VertexData: type, comptime EdgeData: type, comptime Fac
 
         /// Simple utility to link together two half edges like links in a chain
         pub fn chainHalfEdges(self: *Self, a: HalfEdge.Handle, b: HalfEdge.Handle) void {
-            const hedge_pool = &self.pools.half_edge;
+            const hedge_pool = &self.hedges;
             a.deref(hedge_pool).next = b;
             b.deref(hedge_pool).prev = a;
         }
 
         pub fn addVertex(self: *Self, allocator: Allocator, data: VertexData) !Vertex.Handle {
-            const verts = &self.pools.vertex;
+            const verts = &self.verts;
             const vert = try Vertex.Handle.alloc(allocator, verts);
             vert.deref(verts).* = .{
                 .half = null,
@@ -385,8 +381,8 @@ pub fn PolyMesh(comptime VertexData: type, comptime EdgeData: type, comptime Fac
         /// Remove all the faces incident to those edges
         /// Deallocate the vertex.
         pub fn removeVertex(self: *Self, allocator: Allocator, vertex: Vertex.Handle) !void {
-            const verts = &self.pools.vertex;
-            const hedges = &self.pools.half_edge;
+            const verts = &self.verts;
+            const hedges = &self.hedges;
 
             if (vertex.halfOrNull(verts)) |start| {
                 var to_remove: std.ArrayListUnmanaged(Edge.Handle) = .empty;
@@ -411,9 +407,9 @@ pub fn PolyMesh(comptime VertexData: type, comptime EdgeData: type, comptime Fac
         ///- Only one edge is allowed between A and B.
         ///- A cannot equal B
         pub fn addEdge(self: *Self, allocator: Allocator, from: Vertex.Handle, to: Vertex.Handle, data: ?EdgeData) !Edge.Handle {
-            const verts = &self.pools.vertex;
-            const edges = &self.pools.edge;
-            const hedges = &self.pools.half_edge;
+            const verts = &self.verts;
+            const edges = &self.edges;
+            const hedges = &self.hedges;
 
             if (to.inner == from.inner) return error.DuplicateVertices;
             if (from.halfOrNull(verts)) |half|
@@ -473,9 +469,9 @@ pub fn PolyMesh(comptime VertexData: type, comptime EdgeData: type, comptime Fac
 
         /// Removes an edge from the mesh, cleaning up after itself.
         pub fn removeEdge(self: *Self, allocator: Allocator, edge: Edge.Handle) !void {
-            const edges = &self.pools.edge;
-            const hedges = &self.pools.half_edge;
-            const verts = &self.pools.vertex;
+            const edges = &self.edges;
+            const hedges = &self.hedges;
+            const verts = &self.verts;
 
             const half = edge.half(edges);
             const twin = half.twin(hedges);
@@ -512,9 +508,9 @@ pub fn PolyMesh(comptime VertexData: type, comptime EdgeData: type, comptime Fac
         /// Adds a face described by a set of vertices.
         /// Assumes that vertices are in either clockwise or counter clockwise order.
         pub fn addFace(self: *Self, allocator: Allocator, vertices: []const Vertex.Handle, data: FaceData) !Face.Handle {
-            const edges = &self.pools.edge;
-            const faces = &self.pools.face;
-            const hedges = &self.pools.half_edge;
+            const edges = &self.edges;
+            const faces = &self.faces;
+            const hedges = &self.hedges;
             // Check that the data is valid and that the given half-edge loop can be turned into a polygon as given by the required conditions.
             if (vertices.len < 3) return error.LoopTooSmall;
             // TODO: Check that vertices are unique
@@ -551,8 +547,8 @@ pub fn PolyMesh(comptime VertexData: type, comptime EdgeData: type, comptime Fac
         /// Set the polygon of each boundary half-edge to null.
         /// Deallocate the polygon.
         pub fn removeFace(self: *Self, allocator: Allocator, face: Face.Handle) !void {
-            const faces = &self.pools.face;
-            const hedges = &self.pools.half_edge;
+            const faces = &self.faces;
+            const hedges = &self.hedges;
 
             const start = face.half(faces);
             var current = start;

@@ -80,10 +80,10 @@ pub fn main() !void {
         handles.items[1],
     }, "G");
 
-    const hedges = &mesh.pools.half_edge;
-    const edges = &mesh.pools.edge;
-    const verts = &mesh.pools.vertex;
-    const faces = &mesh.pools.face;
+    const hedges = &mesh.hedges;
+    const edges = &mesh.edges;
+    const verts = &mesh.verts;
+    const faces = &mesh.faces;
 
     try mesh.dumpDebugInfo(stdio, false);
 
@@ -164,14 +164,14 @@ pub fn main() !void {
 
 const he_dist = 8;
 fn drawEdge(mesh: *Mesh, edge: Mesh.Edge.Handle) void {
-    const half = edge.half(&mesh.pools.edge);
+    const half = edge.half(&mesh.edges);
 
     const origin = half
-        .origin(&mesh.pools.half_edge)
-        .deref(&mesh.pools.vertex);
+        .origin(&mesh.hedges)
+        .deref(&mesh.verts);
     const destination = half
-        .destination(&mesh.pools.half_edge)
-        .deref(&mesh.pools.vertex);
+        .destination(&mesh.hedges)
+        .deref(&mesh.verts);
 
     const start, const end = .{ origin.data.pos, destination.data.pos };
     const direction = end.subtract(start).normalize();
@@ -196,11 +196,11 @@ fn drawEdge(mesh: *Mesh, edge: Mesh.Edge.Handle) void {
 
 fn drawHalfEdge(mesh: *Mesh, half: Mesh.HalfEdge.Handle) void {
     const origin = half
-        .origin(&mesh.pools.half_edge)
-        .deref(&mesh.pools.vertex);
+        .origin(&mesh.hedges)
+        .deref(&mesh.verts);
     const destination = half
-        .destination(&mesh.pools.half_edge)
-        .deref(&mesh.pools.vertex);
+        .destination(&mesh.hedges)
+        .deref(&mesh.verts);
     const start, const end = .{ origin.data.pos, destination.data.pos };
 
     const pad = 24;
