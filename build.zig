@@ -16,7 +16,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const poly_mesh = b.addModule("polymesh", .{
-        .root_source_file = .{ .cwd_relative = "./src/polymesh.zig" },
+        .root_source_file = .{ .cwd_relative = "./src/root.zig" },
         .target = target,
         .optimize = optimize,
     });
