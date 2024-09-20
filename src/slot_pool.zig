@@ -35,6 +35,14 @@ pub fn SlotPool(comptime T: type, options: Options) type {
             self.free_bitset.deinit(allocator);
         }
 
+        pub fn initCapacity(allocator: Allocator, num: usize) Self {
+            return .{
+                .slot_list = List.initCapacity(allocator, num),
+                .free_list = .empty,
+                .free_bitset = std.DynamicBitSetUnmanaged.initEmpty(allocator, num),
+            };
+        }
+
         /// Allocates a Slot in the pool and returns the handle
         pub fn alloc(self: *Self, allocator: Allocator) !Handle {
             if (self.free_list.popOrNull()) |first_free| {
