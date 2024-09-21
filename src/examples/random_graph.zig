@@ -20,10 +20,10 @@ pub fn main() anyerror!void {
 
     var mesh: Mesh = .empty;
     defer mesh.deinit(allocator);
-    const hedges = &mesh.pools.half_edge;
-    const edges = &mesh.pools.edge;
-    const verts = &mesh.pools.vertex;
-    const faces = &mesh.pools.face;
+    const hedges = &mesh.hedges;
+    const edges = &mesh.edges;
+    const verts = &mesh.verts;
+    const faces = &mesh.faces;
     _ = faces; // autofix
 
     var handles: std.ArrayListUnmanaged(Mesh.Vertex.Handle) = .empty;
@@ -68,7 +68,8 @@ pub fn main() anyerror!void {
         // tick
         var vert_iter = verts.iterator();
         // Behold the worlds worst physics simulation
-        while (vert_iter.next()) |vert| {
+        while (vert_iter.next()) |v| {
+            const vert = v.deref(verts);
             var new_pos = vert.data.pos.add(vert.data.vel);
 
             var oob = false;
@@ -118,7 +119,7 @@ pub fn main() anyerror!void {
 
         var edge_iter = edges.iterator();
         while (edge_iter.next()) |edge| {
-            const half = edge.half;
+            const half = edge.half(edges);
             const from = half.origin(hedges).deref(verts);
             const to = half.twin(hedges).origin(hedges).deref(verts);
             rl.drawLineEx(from.data.pos, to.data.pos, 2, rl.Color.ray_white);

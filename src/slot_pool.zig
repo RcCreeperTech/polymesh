@@ -43,6 +43,10 @@ pub fn SlotPool(comptime T: type, options: Options) type {
             };
         }
 
+        pub fn count(self: *Self) usize {
+            return self.slot_list.items.len - self.free_list.items.len;
+        }
+
         /// Allocates a Slot in the pool and returns the handle
         pub fn alloc(self: *Self, allocator: Allocator) !Handle {
             if (self.free_list.popOrNull()) |first_free| {
